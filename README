@@ -1,0 +1,54 @@
+CDD info:
+
+========================================================================
+========================   INPUT PARAMETERS  ===========================
+========================================================================
+
+Currently required input parameters are:
+
+Parameter	Type (vector/scalar)	Meaning
+-------------------------------------------
+dim			int	(s)					Number of dimensions for the simulation
+dx			float (v/s)				Grid spacing.  Can be a vector of length dim to
+										specify different dimensions separately.
+nx			int (v/s)				Number of grid points.  Can be a vector of length dim to
+										specify different dimensions separately.
+X			float (v/s)				Total spatial extent.  Can be a vector of length dim to
+										specify different dimensions separately.
+dt			float (s)				Time step
+nt			int (s)					Number of time steps
+T			float (s)				Total time to run for
+
+
+
+
+
+
+========================================================================
+========================   PROGRAM FLOW  ===============================
+========================================================================
+
+This is a typical program flow, starting from a call of solve().
+In this graph, a hyphen '-' indicates a function call or instantiation, 
+and a greater-than sign '>' indicates a pseudocode description of 
+something a function does.
+
+
+- solve()
+	- configer()
+	> Set up the settings for the simulation
+		> Build config, with defaults overriden by a config file overriden
+			by user specifications.
+		> Update globals with user specifications (in case the user wants 
+			to do something like override classes).
+		- vectorateParam()
+			> Vectorize grid parameters
+		> Seed random number generator with user provided seed
+		- checkConfig()
+			> Make sure that dx, nx, and X are not overspecified
+			> Make sure that dt, nt, and T are not overspecified
+	- stateInit()
+	> Initialize state object
+		> Use user-provided initial state if provided
+		- state()
+		> state class

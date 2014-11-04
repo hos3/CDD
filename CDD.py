@@ -1,36 +1,34 @@
 # CDD.py
 from __future__ import division
+from __future__ import print_function
 
 #import scipy as sp
 import numpy as np
 import CDD_defaults as Cd
 
 default_config = {
-	'nx':2**6,			# Number of grid points in each dimension (can be a vector)
-	'nt':2**9,			# Number of time steps
-	'X':None,			# Total spatial size
-	'T':None,			# Total time
-	'dx':.01,			# Lattice spacing
-	'dt':.01,			# Time step
-	'dim':2,			# Spatial dimension
-	'out':Cd.out0,		# Output function
-	'stepper':Cd.RK,	# Time stepper function
-	'method':Cd.CUW,	# Differencing method
-	'flux':Cd.flux0,	# Flux function
-	'adaptive':False,	# Adaptive time steps?
-	'disordr':False,	# Disorder field?  Set this to the paramters of the disorder field (see below)
-	'snapX':True,		# Snap X to dx*nx (otherwise snap dx to X/nx)
-	'snapT':True,		# Snap T to dt*nt (otherwise snap dt to T/nt)
-	'opfInit':(1.,.1),	# Initialization parameters for the order parameter field (see below)
-	'seed':0			# Seed for random number generator
+	'nx':2**5,				# Number of grid points in each dimension (can be a vector)
+	'nt':2**9,				# Number of time steps
+	'X':None,				# Total spatial size
+	'T':None,				# Total time
+	'dx':.01,				# Lattice spacing
+	'dt':.01,				# Time step
+	'dim':2,				# Spatial dimension
+	'out':Cd.out0,			# Output function
+	'stepper':Cd.RK,		# Time stepper function
+	'method':Cd.CUW,		# Differencing method
+	'flux':Cd.flux0,		# Flux function
+	'adaptive':False,		# Adaptive time steps?
+	'disordr':False,		# Disorder field?  Set this to the paramters of the disorder field (see below)
+	'snapX':True,			# Snap X to dx*nx (otherwise snap dx to X/nx)
+	'snapT':True,			# Snap T to dt*nt (otherwise snap dt to T/nt)
+	'opf0':(20,1.,.1),		# Initialization parameters for the order parameter field (see below)
+	'opfInit':betaInit,		# Order parameter field initializer
+	'seed':0				# Seed for random number generator
 	}
 
 
-def solve(nx=None,nt=None,X=None,T=None,dx=None,dt=None,dim=None,
-			config=None,configFile=None,out=None,
-			stepper=None,method=None,flux=None,
-			adaptive=False,disordr=False,snapX=True,snapT=True,
-			seed=None,opfInit=None,state0=None,configer=None,vb=True,**xtra):
+def solve(config=None, vb=True, **xtra):
 	'''Solver for the CDD equations - under development.
 		The 'vb' parameter stands for 'verbose' and indicates that the 
 		program should output status updates while running.
@@ -64,76 +62,113 @@ def solve(nx=None,nt=None,X=None,T=None,dx=None,dt=None,dim=None,
 		If you specify all three in either case, a warning is issued
 		and the step size (dt or dx) and total extent (T or X) are used.
 		
+		(nx=None,nt=None,X=None,T=None,dx=None,dt=None,dim=None,
+			config=None,configFile=None,out=None,
+			stepper=None,method=None,flux=None,
+			adaptive=False,disordr=False,snapX=True,snapT=True,
+			seed=None,opfInit=None,state0=None,configer=None,vb=True,**xtra)
+		
 		'''
 	
-	if configer==None:			# The configer is a function that sets the configuration
-		configer = configer0
+	# Polish up config so that it's ready to go for the simulation:
+	config = configer(config,xtra,vb=vb)	# config has all configuration details
 	
-	# Set up config, state, and dyn:
-	config = configer(nx,nt,X,T,dx,dt,dim,out,stepper,method,flux,\
-		adaptive,disordr,snapX,snapT,seed,config,configFile,vb,xtra=xtra)
+	# Initialize the state object:
+	state = stateInit(config,vb=vb)
+	
+	''' While initializing dyn, it may be good to update state as well, to
+		allow for the case where dyn will store previous values of state.
+		In such a case, dynInit might do preliminary time steps of state
+		to get the needed number of previous states in dyn, at which point
+		normal execution of time steps may start. '''
+	#(dyn,state) = dynInit(config,state,vb)
 
-	state = stateInit(config,state0,opfInit,vb,xtra)
-	# While initializing dyn, it may be good to update state as well, to
-	# allow for the case where dyn will store previous values of state.
-	# In such a case, dynInit might do preliminary time steps of state
-	# to get the needed number of previous states in dyn, at which point
-	# normal execution of time steps may start.
-	#######(dyn,state) = dynInit(config,state,vb,xtra=xtra)
-	
 	return state,config
 	
 	#state,dyn = run(state,dyn,config,vb)
 
 #---------------------------------------------------------------------
-def configer0(nx=None,nt=None,X=None,T=None,dx=None,dt=None,dim=None,
-	out=None,stepper=None,method=None,flux=None,adaptive=None,disordr=None,
-	snapX=None,snapT=None,seed=None,config0=None,configFile=None,
-	vb=None,**xtra):
+def configer(config,xtra,vb=True):
 	'''Sets up the configuration details for the CDD simulation. 
 		The default setup comes from CDD_defaults, which is over-riden by
 		the configuration file provided in 'configFile', which is 
 		over-riden by the variables in the dictionary 'config0', 
 		which is over-riden by explicit arguments. '''
-	if vb: print "configer0(): Setting up configuration."
+	
+	if vb: print("configer0(): Setting up configuration.")
 	
 	# The way this works is that everything goes through 'config' while
 	# we set up precedence, and then after that is done we split up 
 	# 'config' into seperate 'state' and 'dyn'
-	config = default_config
-	if configFile is not None: config.update(readConfigFile(configFile))
-	if config0 is not None: config.update(config0)
-	for (k,v) in zip(['nx','nt','X','T','dx','dt','dim','out','stepper',\
-			'method','flux','adaptive','disordr','snapX','snapT','seed','xtra'],\
-			[nx,nt,X,T,dx,dt,dim,out,stepper,method,flux,adaptive,disordr,snapX,snapT,seed,xtra]):
-		if v is not None:
-			config.update({k:v})
+	
+	if config is None: config = {}
+	config.update(xtra)			# First update config with "command line" arguments
+	
+	try:						# Next look for a configuration file
+		configFile = config['configFile']	# User-supplied file
+	except KeyError:
+		try:
+			configFile = default_config['configFile']	# Default file
+		except KeyError:					# No config file
+			if vb: print("No config file provided")
+			configFile = None
+	
+	# Now start building the final config dict:
+	config0 = default_config.copy()
+	if configFile is not None: config0.update(readConfigFile(configFile))
+	config0.update(config)
+	config = config0		# Copy config0 back to config
+	
+	# Allow overriding of arbitrary global defaults: (e.g. if you want to change 'checkConfig' or something)
+	if 'globl' in config.keys():
+		globals().update(config.globl)
 	
 	# Next make all grid parameters to be vectors (recall that scalar inputs are allowed):
+	if vb: print("Vectorizing grid parameters...")
 	for k in ['nx','dx','X']:
 		config[k] = vectorateParam(config[k],config['dim'])
-
+		if vb: print(k+" = "+str(config[k]))
+	
+	# Seed the random number generator:
+	if 'seed' in config.keys():
+		np.random.seed(config['seed'])
+	
 	# Now check everything for consistency:
 	return checkConfig(config,vb)
 
 #---------------------------------------------------------------------
 def vectorateParam(p,dim):
 	'''Makes sure that parameter p is a vector of dimension dim.
-		If p is a scalar, it gets replicated into a vector.  If it's a 
-		vector of length != dim, then the first element gets replicated
-		into a vector of length dim, and a warning is issued.'''
-	if np.isscalar(p):
-		p = np.array([p]*dim)	# This makes it a vector
+		If p is a scalar or length 1 iterable, it gets replicated 
+		into a vector.  If p is a length dim iterable, it is made into
+		a numpy vector.  If p is None, then it just gets returned.  
+		Otherwise a ValueError is raised.'''
+	
+	# Case 0: If p has length == dim, return p as a numpy vector:
+	if hasattr(p,'__len__') and p.shape[0] == dim:
+		p = np.array([i for i in p])
+		
+		# Case 1: if p is a genuine scalar, make it a vector:
+	elif np.isscalar(p):
+		p = np.array([p]*dim)
+		
+		# Case 2: If p is a length 1 array, make it longer:
 	elif hasattr(p,'__len__') and p.shape[0] != dim and p.shape[0] == 1:
 		p = np.array([p[0]]*dim)
-	elif hasattr(p,'__len__'):
+		
+		# Case 3: If p is None, return None:
+	elif p is None:
+		pass
+		
+	else:
 		raise ValueError("Warning: a grid parameter has a different dimension than the simulation:"+str(p))
+		
 	return p
 
 #---------------------------------------------------------------------
-def checkConfig(config,vb=None):
+def checkConfig(config,vb=True):
 	'''Does error checking on 'config' to make sure that everything is reasonable.'''
-	if vb: print "checkConfig(): Checking configuration..."
+	if vb: print("checkConfig(): Checking configuration...")
 	
 	# Check that two of nx, X, and dx are specified:
 		# The sum[...] below counts how many of nx,dx,X are non-null.
@@ -151,10 +186,13 @@ def checkConfig(config,vb=None):
 	else:
 		if config['nx']==None:
 			config['nx'] = int(config['X']/config['dx'])
+			if vb: print('Setting nx = '+srt(config['nx']))
 		elif config['dx']==None:
 			config['dx'] = config['X']/config['nx']
+			if vb: print('Setting dx = '+str(config['dx']))
 		else:
 			config['X']  = config['nx']*config['dx']
+			if vb: print('Setting X = '+str(config['X']))
 	
 	# Now make the relationship between nx, X, and dx exact:
 	if config['snapX']:
@@ -174,10 +212,13 @@ def checkConfig(config,vb=None):
 	else:
 		if config['nt']==None:
 			config['nt'] = int(config['T']/config['dt'])
+			if vb: 'Setting nt = '+str(config['nt'])
 		elif config['T']==None:
 			config['T'] = config['nt']*config['dt']
+			if vb: 'Setting T = '+str(config['T'])
 		else:
 			config['dt'] = config['T']/config['nt']
+			if vb: 'Setting dt = '+str(config['dt'])
 	
 	# Make relationship between nt, T, and dt exact:
 	if config['snapT']:
@@ -185,34 +226,223 @@ def checkConfig(config,vb=None):
 	else:
 		config['dt'] = config['T']/config['nt']
 	
+	if vb: print("Config check done.")
 	return config
 
 #---------------------------------------------------------------------
-def stateInit(config,state0,opfInit,vb=None,xtra=None):
+def stateInit(config,vb=True):
 	'''Initializes the CDD state.  If state0 is provided, it is the initial
-	state, and it can be specified in several ways.  If state0 is a member 
-	of the CDDState class, it is taken to be precisely the initial state, 
-	so output state=state0.  If state0 is a string, it is taken to be a
-	file name from which the initial state is taken; in this case, the 
-	extension determines how the file is processed.'''
+		state, and it can be specified in several ways.  If state0 is a member 
+		of the CDDState class, it is taken to be precisely the initial state, 
+		so output state=state0.  If state0 is a string, it is taken to be a
+		file name from which the initial state is taken; in this case, the 
+		extension determines how the file is processed.
+		
+		REQUIRES CONFIG TO HAVE: (no requirements)
+		'''
+	if vb: print("Initializing state...")
 	
-	if isinstance(state0,CDDState): return state0	# This is the easy case.
-	
-	if state0==None: return CDDState(config)		# This is the other easy case.
-	
-	############ Fill this in later
+	if (not 'state0' in config.keys()) or (cofig['state0'] is None): # Easy case: just make new object
+		if vb: print("No initial data provided.  Initializing new state from seed.")
+		return CDDState(config)
+	else:
+		if isinstance(config['state0'],CDDState):	# Another easy case: Use supplied object
+			if vb: print("Using provided initial state.")
+			return state0
+		
+		############ Fill this in later
 
 #---------------------------------------------------------------------
-class CDDState(dict):
+class CDDState():
 	'''CDDState records the CDD state at a moment of time.
 		The properties stored are grid shape, order parameter field,
 		disorder field, a method for computing flux, and a seed used to 
-		initialize the fields.'''
-	
-	keyz = {'nx','X','dx','dim','flux','disordr','seed'}
-	def __init__(self, config):
-		self.d = dict( [(k,config[k]) for k in self.keyz] )
+		initialize the fields.
 		
-		if self.d['seed']==0:
-			self.d['opf'] = np.zeros( ([3,3])+list(self.d['nx']) )
-	##################
+		REQUIRES CONFIG TO HAVE:
+			nx		-Number of grid points in each dimension
+			X		-Total spatial extent in each dimension
+			dx		-Grid spacing in each dimension
+			dim		-Number of dimensions
+			flux	-Flux function
+			disordr	-Is there disorder or not
+		'''
+	
+	attr = {'nx','X','dx','dim','flux','disordr'}
+	def __init__(self, config,vb=True):
+		
+		if vb: print("Initializing CDDState object...")
+		for a in self.attr:
+			setattr(self,a,config[a])
+		
+		if vb: print("Initializing order parameter field...")
+		self.opf = config['opfInit'](config,vb)
+		
+		if config['disordr']:
+			if vb: print("Initializing disorder field...")
+			N,A,w = config['disordr']
+			self.disordr = randGssnField(self.dx,self.nx,N,A,w)
+		
+		if vb: print("Done initializing CDDState object.")
+	
+	def __getitem__(self,slc):
+		'''Fancy indexing routine.  The way this works is as follows:
+			'slc' represents an index or slice or tuple of slices
+			(i.e. what you get by putting '[stuff]' after the object name).
+			If the first (or only) element of slc is an attribute name,
+			then the return value comes from that attribute.  If the first
+			element of slc doesn't match any attribute name, it is assumed
+			that the user is looking for the order parameter field.
+			All the elements of slc that remain are then passed through a 
+			conversion function (sliceByXYZ), which allows indexing by 
+			letters like 'x', 'y', and 'z', and then the resulting 
+			reformatted slice is passed to the attribute in question.
+			'''
+		gattr = 'opf'		# Get this attribute; by default, look at the order parameter field beta
+		
+		if not isinstance(slc,tuple):	# If user calls self[stuff] and stuff has no commas
+			if slc in self.attr:
+				return getattr(self,slc)
+			else:
+				return getattr(self,gattr)[sliceByXYZ(slc)]
+			
+		else:
+			if isinstance(slc[0],str) and slc[0] in dir(self):
+				return getattr(self,slc[0])[tuple(map(sliceByXYZ,slc[1:]))]
+			else:
+				return getattr(self,gattr)[tuple(map(sliceByXYZ,slc))]	
+
+#---------------------------------------------------------------------
+def sliceByXYZ(slc,root='x'):
+	'''Takes a slice slc and looks to see whether it has the form
+		slice('x','y',1) or something similar; if it does, then all the 
+		chars are replaced by corresponding integers, via the map
+		'x' -> 0, 'y' -> 1, 'z' -> 2.  ALSO, THE STOP INDEX IS 
+		INCREMENTED BY 1 TO MAKE THE BOUND INCLUSIVE.  THIS IS NEEDED 
+		SO THAT 'z' CAN BE ACCESSED EASILY.
+		
+		IF THE UPPER BOUND OF slc IS INPUT AS A STRING, THEN IT WILL BE INCLUSIVE!
+		
+		The mapping of 'x' to 0 can be modified by changing the optional
+		parameter 'root' to something other than 'x'.
+		Several alternative forms are accepted for specifying the slice:
+		If slc is a single char, it is converted to a single int.
+		If slc has the form 'x:z:2' it is converted to a slice of the 
+			form 0:3:2.  (NOTE UPPER BOUND IS INCLUSIVE)
+		If slc has the form 'xz' it is converted to a slice of the form
+			0:3.  (NOTE UPPER BOUND IS INCLUSIVE)
+		'''
+	root = root.lower()			# For consistency, everything will be lowercase.
+	def c2i(a):					# This turns a char index into an int index (with 'x' -> 0)
+		if a.isdigit():			# If this is a string of a number, return the number
+			return int(a)
+		elif len(a)==1:			# If this is a char, return its ASCII ordinal (minus root ordinal)
+			return ord(a)-ord(root)
+		elif len(a)==0:			# If this is an empty string, return None (this works with slices)
+			return None
+		else:					# Otherwise, there's a problem
+			raise ValueError("Function sliceByXYZ says: Ack! Too many letters in slice "+str(slc))
+	
+	if isinstance(slc,int):		# If we have an integer, just return
+		return slc
+	elif isinstance(slc,slice):	# If we have a slice object, just format the start, stop and step to be integers
+		start, stop, step = slc.start, slc.stop, slc.step
+		if isinstance(start,str): start = c2i(start)		# This makes start an integer
+		if isinstance(stop,str): stop = c2i(stop)+1			# NOTE INCLUSIVE UPPER BOUND
+		if isinstance(step,str): step = c2i(step)
+		return slice(start,stop,step)
+		
+		# If we have a string, there are several possible interpretations:
+	elif isinstance(slc,str):
+		# The case with colons is the hardest, requiring several sub-cases:
+		if ':' in slc:
+			slc = map(c2i,slc.split(':'))	# First break up stuff between colons
+			if len(slc)==3: 				# If three items supplied, then they should be start:stop:step
+				slc = slice(slc[0],slc[1]+1,slc[2])			# NOTE INCLUSIVE UPPER BOUND
+			elif len(slc)==2:				# If two items supplied, then they should be start:stop
+				slc = slice(slc[0],slc[1]+1)				# NOTE INCLUSIVE UPPER BOUND
+			else:
+				raise ValueError("Function sliceByXYZ says: Ack! Too many colons in slice "+slc)
+			
+			# The remaining cases are easier:
+		elif len(slc)==1: 					# If it's a single char, just change to int
+			slc = c2i(slc)
+		elif len(slc)==2:					# If it is just two letters, make an inclusive slice
+			slc = slice(c2i(slc[0]),c2i(slc[1])+1)			# NOTE INCLUSIVE UPPER BOUND
+		else:
+			raise ValueError("Function sliceByXYZ says: Ack! Too many leters in slice "+slc)
+		
+	else:
+		raise ValueError("Function sliceByXYZ doesn't like your slice "+str(slc))
+	
+	return slc
+
+#---------------------------------------------------------------------
+def betaInit(config, vb=True):
+	'''Initializes an order parameter field (opf), either using a provided
+		opf or else making a random new one from a tuple of parameters
+		(N,A,w), where N is the number of Gaussian peaks to make, A is 
+		their amplitude, and w is their width.
+		
+		REQUIRES CONFIG TO HAVE:
+			dx		-Grid spacing
+			nx		-Grid shape
+			opf		-Data to create the initial opf; should either be a 
+						full opf or else a tuple of the form (N,A,w)
+		'''
+	if vb: print("Initializing beta field...")
+	
+	# Easy case first: if user gives an opf, use that:
+	if hasattr(config['opf0'],'shape') and config['opf0'].shape==(3,3)+(config['nx'],)*dim:
+		beta = config['opf0']
+		
+		# Otherwise, if config is a tuple:
+	elif isinstance(config['opf0'],(0,).__class__):
+		'''In this case, we take opf0 to have the form (N,A,w), where
+			N is a number of random Gaussian peaks to produce, A is their
+			amplitude, and w is their width.'''
+		dx = config['dx']
+		nx = config['nx']
+		N,A,w = config['opf0']
+		
+		beta = np.zeros([3,3]+[i for i in nx])
+		for i in range(3):
+			for j in range(3):
+				beta[i,j,...] = randGssnField(dx,nx,N,A,w)
+	
+	return beta
+
+#---------------------------------------------------------------------
+def randGssnField(dx,nx,N,A,w,mode='wrap'):
+	'''Makes a field of N randomly located Gaussians, each with height A
+		and width w. 
+		dx gives the lattice spacing 
+		nx the number of lattice points (dx and nx should be vectors of the same length).
+		N is the number of Gaussians to make
+		A is the amplitude of the Gaussians
+		w is the width of the Gaussians
+		'''
+	from scipy.ndimage import gaussian_filter as gfilter
+	
+	w = w/np.array([i for i in dx])		# Format w for input to gfilter
+	
+	rgf = np.zeros(nx)		# This will hold the random Gaussian field
+	# Get coordinates for the centers of the Gaussians:
+	idxs = np.floor( np.random.rand(len(nx),N) * np.array([nx]).T ).astype(int)
+	# Set grid locations specified by above coordinates to the desired amplitude:
+	rgf[ [idxs[i] for i in range(len(nx))] ] = A
+	# Apply Gaussian filter:
+	rgf = gfilter(rgf,sigma=w,mode=mode)
+	
+	return rgf
+
+#---------------------------------------------------------------------
+def dynInit(config,state,vb=True):
+	'''Initializes the dynamics for the CDD state. 
+		
+		REQUIRES CONFIG TO HAVE:
+			
+			
+		'''
+	pass
+	
