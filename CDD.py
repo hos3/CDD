@@ -11,6 +11,8 @@ default_config = {
 	'nt':2**9,				# Number of time steps
 	'X':None,				# Total spatial size
 	'T':None,				# Total time
+	'T0':0,					# Starting time
+	'Tf':None,				# Stopping time
 	'dx':.01,				# Lattice spacing
 	'dt':.01,				# Time step
 	'dim':2,				# Spatial dimension
@@ -81,11 +83,13 @@ def solve(config=None, vb=True, **xtra):
 		In such a case, dynInit might do preliminary time steps of state
 		to get the needed number of previous states in dyn, at which point
 		normal execution of time steps may start. '''
-	#(dyn,state) = dynInit(config,state,vb)
+	#(dyn,t,dt,state) = dynInit(config,state,vb)
 
 	return state,config
 	
 	#state,dyn = run(state,dyn,config,vb)
+	
+	#while t < T0+T
 
 #---------------------------------------------------------------------
 def configer(config,xtra,vb=True):
@@ -178,9 +182,9 @@ def checkConfig(config,vb=True):
 	s = sum([int(np.any(config[k])) for k in {'nx','dx','X'}])
 	if s < 2:
 		raise ValueError("Not enough grid parameters specified.")
-	elif s > 2:
+	elif s > 2 and (config['X']!=config['dx']*config['nx']):
 		config['nx'] = int(config['X']/config['dx'])
-		raise UserWarning("Grid parameters overspecified.  Using: \n\t nx="\
+		print("Warning: Grid parameters overspecified.  Using: \n\t nx="\
 			+str(config['nx'])+"\n\t X="+str(config['X'])+"\n\t dx="+\
 			str(config['dx']))
 	else:
@@ -200,13 +204,19 @@ def checkConfig(config,vb=True):
 	else:
 		config['dx'] = config['X']/config['dx']
 	
-	# Repeat the above procedure for the time parameters:
+	# If starting and ending times are specified, fill in for total time:
+	if config['T0'] is not None and config['Tf'] is not None:
+		if config['T'] is not None:
+			print("Warning: Time range overspecified. Using: T="+str(config['Tf']-config['T0']))
+		config['T'] = config['Tf']-config['T0']
+	
+	# Do an alignment of the time parameters (as for the grid parameters):
 	s = sum([int(np.any(config[k])) for k in {'nt','dt','T'}])
 	if s < 2:
-		raise ValueError("Not enough time parameters specified.")
-	elif s > 2:
+		print("Warning: Not enough time parameters specified.")
+	elif s > 2 and (config['T']!=config['dt']*config['nt']):
 		config['nt'] = int(config['T']/config['dt'])
-		raise UserWarning("Time parameters overspecified.  Using: \n\t nt="\
+		print("Warning: Time parameters overspecified.  Using: \n\t nt="\
 			+str(config['nt'])+"\n\t T="+str(config['T'])+"\n\t dt="+\
 			str(config['dt']))
 	else:
@@ -225,6 +235,18 @@ def checkConfig(config,vb=True):
 		config['T'] = config['nt']*config['dt']
 	else:
 		config['dt'] = config['T']/config['nt']
+	
+	# Re-align time interval bounds:
+	if config['T0'] is None and config['Tf'] is None:
+		print('Neither time interval endpoint is set.  Using T0=0')
+		config['T0'] = 0
+		config['Tf'] = config['T']
+	elif config['T0'] is not None:
+		if config['Tf'] != config['T']+config['T0']: 
+			print('Warning: Tf has changed.  New value: '+str(config['T']+config['T0']))
+		config['Tf'] = config['T']+config['T0']
+	else:
+		config['T0'] = config['Tf']-config['T']
 	
 	if vb: print("Config check done.")
 	return config
