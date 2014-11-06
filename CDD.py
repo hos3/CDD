@@ -7,26 +7,30 @@ import numpy as np
 import CDD_defaults as Cd
 
 default_config = {
+	'dim':2,				# Spatial dimension
 	'nx':2**5,				# Number of grid points in each dimension (can be a vector)
 	'nt':2**9,				# Number of time steps
+	'dx':.01,				# Lattice spacing
+	'dt':.01,				# Time step
 	'X':None,				# Total spatial size
 	'T':None,				# Total time
 	'T0':0,					# Starting time
 	'Tf':None,				# Stopping time
-	'dx':.01,				# Lattice spacing
-	'dt':.01,				# Time step
-	'dim':2,				# Spatial dimension
-	'out':Cd.out0,			# Output function
-	'stepper':Cd.RK,		# Time stepper function
-	'method':Cd.CUW,		# Differencing method
-	'flux':Cd.flux0,		# Flux function
 	'adaptive':False,		# Adaptive time steps?
+	'nstepper':1,			# Number of steps in the time stepper (1 is Euler)
 	'disordr':False,		# Disorder field?  Set this to the paramters of the disorder field (see below)
 	'snapX':True,			# Snap X to dx*nx (otherwise snap dx to X/nx)
 	'snapT':True,			# Snap T to dt*nt (otherwise snap dt to T/nt)
 	'opf0':(20,1.,.1),		# Initialization parameters for the order parameter field (see below)
+	'seed':0,				# Seed for random number generator
+	# The following are functions:
+	'run':runPy,			# Time evolver
 	'opfInit':betaInit,		# Order parameter field initializer
-	'seed':0				# Seed for random number generator
+	'dynInit':dynInit		# Dynamics object initializer
+	'stepper':Cd.AEuler,	# Time stepper function
+	'method':Cd.vv,			# Differencing method
+	'flux':Cd.flux0,		# Flux function
+	'out':Cd.out0			# Output function
 	}
 
 
@@ -83,13 +87,27 @@ def solve(config=None, vb=True, **xtra):
 		In such a case, dynInit might do preliminary time steps of state
 		to get the needed number of previous states in dyn, at which point
 		normal execution of time steps may start. '''
-	#(dyn,t,dt,state) = dynInit(config,state,vb)
+	#dyn,state,t,dt = config['dynInit'](config,state,vb)
 
 	return state,config
 	
-	#state,dyn = run(state,dyn,config,vb)
+	#state,t,dt,dyn = config['run'](state,dyn,vb)
 	
-	#while t < T0+T
+
+#---------------------------------------------------------------------
+def runPy(state,dyn,vb=True):
+	'''Evolves the state, using Python scripting (i.e. no Cuda).
+		
+		REQUIRES dyn TO HAVE: 
+			t		- Current time
+			Tf		- Final time
+			dt		- Time step
+			
+	'''
+	
+	t,Tf,dt = dyn.t,dyn.Tf,dyn.dt
+	while t<Tf:
+		state,t,dt = dyn.stepper(state,t,Tf,dt)
 
 #---------------------------------------------------------------------
 def configer(config,xtra,vb=True):
@@ -247,6 +265,9 @@ def checkConfig(config,vb=True):
 		config['Tf'] = config['T']+config['T0']
 	else:
 		config['T0'] = config['Tf']-config['T']
+	
+	# Set current time t to starting time T0:
+	config['t'] = T0
 	
 	if vb: print("Config check done.")
 	return config
@@ -463,8 +484,28 @@ def dynInit(config,state,vb=True):
 	'''Initializes the dynamics for the CDD state. 
 		
 		REQUIRES CONFIG TO HAVE:
-			
+			dt		- Time step
+			t		- Current time
+			stepper	- Time stepper
+			method	- 
 			
 		'''
-	pass
+	from inspect import getargspec
+	"""The first job is to find out how many steps the stepper is.
+	 If the user provides this, then we're set.  Otherwise, we're going
+	 to guess that it is one less than the number of required arguments
+	 of the stepper (the other argument being the differencing method)."""
+	if 'nsteps' in config.keys():
+		nsteps = config['nsteps']
+	else:
+		nsteps,temp,temp,deflt = getargspec(config['stepper'])
+		nsteps = len(nsteps)-len(deflt)-1
+	
+	"""If nsteps > 1, then we need to evolve the first few time steps 
+	 differently before turning things over to the normal stepper. 
+	 By default, we'll use an Euler stepper to do this initial evolving."""
+	if nsteps > 1:
+		prev = [state]		# prev will be a list of previous states needed for the stepper
+		for i in range(nsteps-1):
+			
 	
